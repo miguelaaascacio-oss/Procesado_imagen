@@ -213,7 +213,7 @@ int dsyevv3(double A[3][3], double Q[3][3], double w[3])
     Q[1][0] = 1.0;
     Q[2][0] = 0.0;
   }
-  else if (norm < SQR(1e-9) * error) //(norm < SQR(64.0 * DBL_EPSILON) * error)
+  else if (norm < SQR(1e-9) * error) // (norm < SQR(64.0 * DBL_EPSILON) * error)
   {                         // If angle between A[0] and A[1] is too small, don't use
     t = SQR(A[0][1]);       // cross product, but calculate v ~ (1, -A0/A1, 0)
     f = -A[0][0] / A[0][1];
@@ -265,7 +265,7 @@ int dsyevv3(double A[3][3], double Q[3][3], double w[3])
       Q[1][1] = 1.0;
       Q[2][1] = 0.0;
     }
-    else if (norm < SQR(1e-9) * error) //(norm < SQR(64.0 * DBL_EPSILON) * error)
+    else if (norm < SQR(1e-9) * error) // (norm < SQR(64.0 * DBL_EPSILON) * error)
     {                       // If angle between A[0] and A[1] is too small, don't use
       t = SQR(A[0][1]);     // cross product, but calculate v ~ (1, -A0/A1, 0)
       f = -A[0][0] / A[0][1];

@@ -10,15 +10,14 @@
 #include <vector>
 #include <stdio.h>
 #include <unistd.h>
+#include <filesystem>
+#include <fstream>
 
 std::mutex frame_mutex;
 std::atomic<bool> running(true);
 std::atomic<bool> ready_enviado(false);
 std::atomic<bool> fueraZona(false);
 std::atomic<bool> EnRuta(false);
-
-cv::VideoCapture* cap = nullptr;
-cv::Mat frame;
 
 
 //* --------- ESTRUCTURA DE DATOS --------- /
@@ -185,22 +184,6 @@ void proyectarMarcador(cv::Mat& img, const DatosMarcador& datos, std::atomic<boo
     	enRuta.store(true);
     if (marcadorEnAreaFoco && esteFuera) 
     	zonaGlobal.store(true);
-    
-    // Dibujar rectangulo de zona segura
-	cv::rectangle(img,
-		      cv::Point(30,30),
-		      cv::Point(610,450),
-		      zonaGlobal.load() ? cv::Scalar(0,0,255)
-		                       : cv::Scalar(0,255,0),
-		      2);
-		      
-    // Dibujar rectangulo de ruta
-	cv::rectangle(img,
-		      cv::Point(200,120),
-		      cv::Point(440,320),
-		      enRuta.load() ? cv::Scalar(0,255,0)
-		                       : cv::Scalar(0,0,255),
-		      2);
 
     std::vector<cv::Point2f> marcador = {
         {255, 0},       // P1 - Esquina superior derecha (Y invertido: 255-255=0)
@@ -270,33 +253,38 @@ void proyectarMarcador(cv::Mat& img, const DatosMarcador& datos, std::atomic<boo
 //* ------------------ FUNCIÓN PRINCIPAL ------------------ /
 int main(int /*argc*/, char** /*argv*/)
 {
+    // 1. CARGAR IMAGEN LOCAL
+    std::string patron = "../*.png";          // ajusta la ruta/extensión
+    std::vector<cv::String> rutas;
+    cv::glob(patron, rutas, false);
 
-    //Abrir camara sin hilo
-    
-    cv::VideoCapture cap(2);
-    int frame_id = 0;
-    Ort::Session& session = yolo_session(); //inicia YOLO
-    
-    if (!cap.isOpened()) {
-        std::cerr << "Error: Could not open the camera." << std::endl;
+    if (rutas.empty()) {
+        std::cerr << "No se encontraron imágenes en: " << patron << std::endl;
         return -1;
     }
+ 
+    Ort::Session& session = yolo_session(); //inicia YOLO
     
-    cv::Mat frame;
-    std::cout << "Streaming camera... Press 'ESC' or 'q' to exit." << std::endl;
+    
+    namespace fs = std::filesystem;
+    fs::path dir = "/home/armas/Documents/TesisMiguelArmas/Tesis_corregida/Prueba_MatrizyPuntos/R_guardadas";
+    fs::create_directories(dir);
+    int contador_R = 0;
 
-    while (running.load()) {
-        cv::Mat frame_nativo;
-        cap >> frame;
-        
+    for (const auto& ruta : rutas) {
+
+        fueraZona.store(false);
+        EnRuta.store(false);
+
+        cv::Mat frame = cv::imread(ruta);
         if (frame.empty()) {
-            std::cerr << "Error: Blank frame grabbed." << std::endl;
-            break;
+            std::cerr << "No se pudo leer: " << ruta << std::endl;
+            continue;
         }
 
         // ---------- Preprocesado ----------
-        cv::Mat grayFull;
         cv::resize(frame, frame, cv::Size(640, 480));
+        cv::Mat grayFull;
         cv::cvtColor(frame, grayFull, cv::COLOR_BGR2GRAY);
 
         // ---------- Detección  ----------
@@ -330,7 +318,6 @@ int main(int /*argc*/, char** /*argv*/)
 
             detectados.insert(detectados.end(), det.begin(), det.end());
         }
-
         
         // ---------- Construcción de DatosMarcador ----------
         std::vector<DatosMarcador> marcadores_procesados;
@@ -345,7 +332,7 @@ int main(int /*argc*/, char** /*argv*/)
             d.R = m.R;
             d.t = m.t;
             //d.norma = cv::norm(m.t);
-            
+
             //Camara centrado al marcador
             double tx = d.t[0];
             double ty = d.t[1];
@@ -360,36 +347,37 @@ int main(int /*argc*/, char** /*argv*/)
             
             //d.norma = std::sqrt((tx * tx) + (ty * ty) + (tz * tz));
 
-            //d.Rt = cv::Mat::eye(4, 4, CV_64F);
-            //for (int r = 0; r < 3; r++) {
-              //  for (int c = 0; c < 3; c++) d.Rt.at<double>(r, c) = m.R(r, c);
-                //d.Rt.at<double>(r, 3) = m.t[r];
-            //}
-            
             marcadores_procesados.push_back(d);
         }
+            
         // ---------- Ordenación Y-X (primero el cercano al origen) ----------
         std::sort(marcadores_procesados.begin(), marcadores_procesados.end(),
             [](const DatosMarcador& a, const DatosMarcador& b) {
-                auto prio = [](const std::vector<cv::Point2f>& pts) {
-                    float min_y = std::numeric_limits<float>::max();
-                    float min_x = std::numeric_limits<float>::max();
-                    for (auto& p : pts) {
-                        if (p.y < min_y) { min_y = p.y; min_x = p.x; }
-                        else if (p.y == min_y && p.x < min_x) min_x = p.x;
-                    }
-                    return std::make_pair(min_y, min_x);
-                };
-                auto pa = prio(a.puntos), pb = prio(b.puntos);
-                if (pa.first != pb.first) return pa.first > pb.first;
-                return pa.second < pb.second;
-            });
+            return a.puntos[1].y > b.puntos[1].y;
+        });
 
         // ---------- Iterar marcadores ----------
         int etiqueta_actual = 1;
+        
+        std::ofstream archivo;
+        if (!marcadores_procesados.empty())
+            archivo.open(dir / (std::to_string(contador_R) + ".txt"));
+    
         for (auto& mp : marcadores_procesados) {
             if (etiqueta_actual > 3) break; 
             mp.etiqueta = etiqueta_actual;
+            
+            //guardamos en txt
+            // Id
+            archivo << mp.etiqueta<< "\n";
+            //Matriz R
+            for (int r = 0; r < 3; r++)
+                archivo << mp.R(r, 0) << " " << mp.R(r, 1) << " " << mp.R(r, 2) << "\n";
+            // vector t
+            archivo << mp.t(0) << " " << mp.t(1) << " " << mp.t(2) << "\n";
+            //puntos
+            for (int k = 0; k < 6; k++)
+                archivo << mp.puntos[k].x << " " << mp.puntos[k].y << "\n";
 
             proyectarMarcador(frame, mp, fueraZona, EnRuta);
 
@@ -398,9 +386,8 @@ int main(int /*argc*/, char** /*argv*/)
             double tx = mp.t[0];
 	    double ty = mp.t[1];
 	    double tz = mp.t[2]; 
-	    //double norma = std::sqrt(tx*tx + ty*ty + tz*tz);
 
-            // Texto AR
+            // Texto 
             int oy = (etiqueta_actual - 1) * 140;
             char buf[128];
             snprintf(buf, sizeof(buf), "E%d Profundidad: %.2f m", mp.etiqueta, -tz);
@@ -410,24 +397,19 @@ int main(int /*argc*/, char** /*argv*/)
             cv::putText(frame, buf, {30, 60 + oy},
                         cv::FONT_HERSHEY_SIMPLEX, 0.6, {0,255,0}, 2);
 
-            //printf("E%d -> x:%.2f y:%.2f z:%.2f | norma:%.2f\n",
-                   //mp.etiqueta, tx, ty, tz, norma);
-
             etiqueta_actual++;
         }
         
+        if (!marcadores_procesados.empty()) contador_R++;
+        
         // ---------- Visualización ----------
         cv::imshow("Marcador Proyectado", frame);
+        cv::imwrite("Procesado.jpg", frame);
+        char key = (char)cv::waitKey(0);
+        if (key == 27 || key == 'q') break;
 
-        char key = (char)cv::waitKey(1);
-        if (key == 27 || key == 'q') running = false;
-
-        frame_id++;
-        usleep(30000); // ~33 FPS
     }
 
-    running = false;
-    cap.release();
     cv::destroyAllWindows();
     printf("\nPrograma finalizado.\n");
     return 0;

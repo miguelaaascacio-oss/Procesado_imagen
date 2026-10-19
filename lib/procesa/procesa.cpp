@@ -668,6 +668,11 @@ void imprimir_lista(){
 		  for (int r = 0; r < 3; r++)
 		    std::cout << m.R(r, 0) << " " << m.R(r, 1) << " " << m.R(r, 2) << "\n";
 		  std::cout << "t: " << m.t[0] << " " << m.t[1] << " " << m.t[2] << std::endl;
+		  
+		  std::cout << "puntos:\n";
+                  for (int k = 0; k < 6; k++)
+                      std::cout << m.puntos[k].x << ", " << m.puntos[k].y << "\n"; std::cout << std::endl;
+
 		}
       }
       puntosMarcador.clear();
